@@ -7,7 +7,7 @@ import scipy.integrate as sp
 
 
 mu = 3.8986 * 10 ** 5 # km^3/s^2
-a_iss = 6770  # Semi-major axis of ISS in meters
+a_iss = 6770  # Semi-major plotis of ISS in meters
 n = np.sqrt((mu)/a_iss**3)  # Orbital rate (rad/s)
 
 T_orb = 2 * np.pi / n  # Orbital period
@@ -57,14 +57,14 @@ x_km = states[:, 0] / 1000
 y_km = states[:, 1] / 1000
 z_km = states[:, 2] / 1000
 
-# Plot the 3D trajectory
-fig = plt.figure(figsize=(10, 8))
-ax = fig.add_subplot(111, projection='3d')
-ax.plot(x_km, y_km, z_km, label='Ceres trajectory')
-ax.scatter(0, 0, 0, color='red', marker='*', s=100, label='ISS')
-ax.set_xlabel('x (km)')
-ax.set_ylabel('y (km)')
-ax.set_zlabel('z (km)')
-ax.set_title('Milestone 1A: Trajectory of Ceres relative to ISS (no thrust)')
-ax.legend()
+# Plot the 3D graph
+figure = plt.figure(figsize=(10, 10))
+plot = figure.add_subplot(111, projection='3d')
+plot.plot(x_km, y_km, z_km, label='Ceres path')
+plot.scatter(0, 0, 0, color='red', marker='*', s=50, label='ISS')
+plot.set_xlabel('x (km)')
+plot.set_ylabel('y (km)')
+plot.set_zlabel('z (km)')
+plot.set_title('Milestone 1A: Trajectory of Ceres relative to ISS (no thrust)')
+plot.legend()
 plt.show()
