@@ -3,31 +3,40 @@ import time
 
 import matplotlib.pyplot as plt
 import numpy as np
+import scipy.integrate as sp
 
 from two_body import TwoBody
 
 mu = 3.8986 * 10 ** 5 # km^3/s^2
 
-y0 = np.array([3088.0, 4036.0, 4499.0, -6.8, 1.6, 3.2]) #km, km/s
+y0 = np.array([10, 10, 10, 0, 0, 0]) #km, km/s
 tb = TwoBody(y0[0:3], y0[3:], mu)
 
-# dy/dt = Ay
-def dy_dt(t, y):
-    # === Implement here ===
+thrust = None
 
-    r = np.linalg.norm(y[0:3])
+# dy/dt = Ay
+def dy_dt(t, y, thrust):
+    # === Implement here ===
+    if thrust == None:
+        thrust = np.array([0, 0, 0])
+
+    semimajor = 6783 #km
+
+    n = np.sqrt(mu/(semimajor**3))
 
     A = np.array([
          [0,0,0,1,0,0],
          [0,0,0,0,1,0],
          [0,0,0,0,0,1],
-         [(-mu/(r**3)),0,0,0,0,0],
-         [0,(-mu/(r**3)),0,0,0,0],
-         [0,0,(-mu/(r**3)),0,0,0]
+         [(3*(n**2)),0,0,0,2*n,0],
+         [0,0,0,-2*n,0,0],
+         [0,0,-n**2,0,0,0]
         ])
+    
+    B = np.array([0, 0, 0, thrust[0], thrust[1], thrust[2]])
 
     # ======================
-    return A @ y
+    return A @ y + B
 
 def dy_dt_w_airdrag(t, y):
     dy = dy_dt(t, y)
@@ -225,7 +234,8 @@ times = np.arange(0, t_max, h)
 y_analytical = np.array([y_true(t, tb) for t in times])
 
 # =========== RK4 ===========
-y_rk4, calc_times_rk4 = rk4_all_step(h, times, dy_dt)
+sol = sp.solve_ivp(dy_dt, (0,t_max), y0, method='RK45' )
+y_rk4, calc_times_rk4 = sol[1], sol[0]
 
 # =========== ABM4 ===========
 y_abm4, calc_times_abm4 = abm4_all_step(h, times, dy_dt)
