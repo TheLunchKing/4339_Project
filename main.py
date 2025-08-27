@@ -5,23 +5,23 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.integrate as sp
 
-from two_body import TwoBody
 
 mu = 3.8986 * 10 ** 5 # km^3/s^2
+a_iss = 6770  # Semi-major axis of ISS in meters
+n = np.sqrt((mu)/a_iss**3)  # Orbital rate (rad/s)
 
-y0 = np.array([10, 10, 10, 0, 0, 0]) #km, km/s
+T_orb = 2 * np.pi / n  # Orbital period
+
+y0 = np.array([10000, 10000, 10000, 0, 0, 0]) #km, km/s
 
 thrust = None
+def thrust_func(t, y):
+    return np.array([10, 0.0, 0.0])
 
 # dy/dt = Ay
-def dy_dt(t, y, thrust):
+def dy_dt(t, y):
     # === Implement here ===
-    if thrust == None:
-        thrust = np.array([0, 0, 0])
-
-    semimajor = 6783 #km
-
-    n = np.sqrt(mu/(semimajor**3))
+    thrust = thrust_func(t, y)
 
     A = np.array([
          [0,0,0,1,0,0],
@@ -37,4 +37,34 @@ def dy_dt(t, y, thrust):
     # ======================
     return A @ y + B
 
-print(dy_dt(0, y0, thrust))
+
+
+sol = sp.solve_ivp(
+                    fun = dy_dt,
+                    t_span = (0,3*T_orb),
+                    y0 = y0,
+                    method = 'BDF'
+                    )
+
+print(sol)
+
+# Extract the results
+states = sol.y.T  # Each row is [x, y, z, ux, uy, uz] at a time step
+times = sol.t
+
+# Convert positions to km for plotting
+x_km = states[:, 0] / 1000
+y_km = states[:, 1] / 1000
+z_km = states[:, 2] / 1000
+
+# Plot the 3D trajectory
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(111, projection='3d')
+ax.plot(x_km, y_km, z_km, label='Ceres trajectory')
+ax.scatter(0, 0, 0, color='red', marker='*', s=100, label='ISS')
+ax.set_xlabel('x (km)')
+ax.set_ylabel('y (km)')
+ax.set_zlabel('z (km)')
+ax.set_title('Milestone 1A: Trajectory of Ceres relative to ISS (no thrust)')
+ax.legend()
+plt.show()
