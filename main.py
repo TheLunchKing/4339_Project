@@ -16,7 +16,7 @@ y0 = np.array([10000, 10000, 10000, 0, 0, 0]) #m, m/s
 
 thrust = None
 def thrust_func(t, y):
-    return np.array([10, 0.0, 0.0])
+    return np.array([0.0, 0.0, 0.0])
 
 # dy/dt = Ay
 def dy_dt(t, y):
@@ -38,6 +38,90 @@ def dy_dt(t, y):
     return A @ y + B
 
 
+
+
+# =========== ABM4 ===========
+def adams_4(t, y, h: float, f_m: list, dy_dt) -> tuple:
+    """Adams-Bashforth-Moulton4 integrator
+
+    Args:
+        t (float): time
+        y (_type_): state variables
+        h (float): step width
+        f_m (list): previous steps' derivatives
+
+    Returns:
+        tuple: y_p (integrated value), calculation time
+    """
+    time_start = time.perf_counter()
+    # === Implement here ===
+
+    fi = dy_dt(t,y) 
+
+    y_pred = y + (h/24)*(55*fi - 59*f_m[-1] + 37*f_m[-2] - 9*f_m[-3] )
+
+    fi1 = dy_dt(t+h,y_pred) 
+
+    y_p = y + (h/720)*(251*fi1 + 646*fi - 264*f_m[-1] + 106*f_m[-2] - 19*f_m[-3])
+
+    f_m.append(fi)
+    if len(f_m) > 4:
+        f_m.pop(0)
+    
+    # ======================
+    time_end = time.perf_counter()
+    return y_p, time_end - time_start
+
+def abm4_all_step(h: float, times: np.array, dy_dt) -> tuple:
+    """ABM4 all step
+
+    Args:
+        h (float): step width
+        times (np.array): array of time
+        dy_dy (function): equation of motion
+
+    Returns:
+        tuple: y_abm4 (array of integrated values), calc_times_abm4 (array of calculation time)
+    """
+    fm_ab4 = []
+
+    y_abm4 = np.zeros((len(times), 6))
+    y_abm4_i = y0
+    y_abm4[0] = y_abm4_i
+
+    calc_time_abm4 = 0
+    calc_times_abm4 = [calc_time_abm4]
+
+    # Initialization of 3 steps for ABM4
+    for i in range(3):
+        t = times[i]
+        fm_ab4.append(dy_dt(t, y_abm4_i))
+        y_abm4_i, calc_time_i = runge_kutta_4(t, y_abm4_i, h, dy_dt)
+
+        y_abm4[i + 1] = y_abm4_i
+
+        calc_time_abm4 += calc_time_i
+        calc_times_abm4.append(calc_time_abm4)
+
+    # Integration with ABM4
+    for i in range(len(times) - 3 - 1):
+        t = times[i + 3]
+
+        y_abm4_i, calc_time_i = adams_4(t, y_abm4_i, h, fm_ab4, dy_dt)
+
+        y_abm4[i + 4] = y_abm4_i
+
+        calc_time_abm4 += calc_time_i
+        calc_times_abm4.append(calc_time_abm4)
+
+    # output total calculation time
+    print("ABM4 time: ", calc_times_abm4[-1])
+    return y_abm4, calc_times_abm4
+# ===========================
+
+
+
+
 time_start = time.perf_counter()
 sol = sp.solve_ivp(
                     fun = dy_dt,
@@ -46,6 +130,7 @@ sol = sp.solve_ivp(
                     method = 'BDF',
                     )
 time_end = time.perf_counter()
+print(time_end - time_start)
 
 print(sol)
 
