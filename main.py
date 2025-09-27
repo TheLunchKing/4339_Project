@@ -40,6 +40,91 @@ def dy_dt(t, y):
 
 
 
+def dy_dt_w_airdrag(t, y):
+    dy = dy_dt(t, y)
+    # Air drag parameter
+    rho = 7.48e-12 # atmosphere density @ 400km alt. [kg/m3]
+    Cd = 1 # drag coefficient
+    A_m = 1 # area mass ratio [m2/kg]
+    # === Implement here ===
+
+    vmag = np.linalg.norm(dy[0:3])*1000
+    vvec = dy[0:3]
+
+    absdrag = 0.5 * rho * (vmag**2) * Cd * A_m
+
+    dragdir = -vvec/vvec 
+
+    a_drag = absdrag*dragdir/1000
+
+    dy[3:6] += a_drag 
+
+    # ======================
+    return dy
+
+# return analytical solution of (r, v)
+def y_true(t, tb: TwoBody):
+    r, v = tb.calc_states(t)
+    return np.array([r[0], r[1], r[2], v[0], v[1], v[2]])
+
+
+# =========== RK4 ===========
+def runge_kutta_4(t, y, h: float, dy_dt) -> tuple:
+    """RK4 integrator
+
+    Args:
+        t (float): time
+        y (_type_): state variables
+        h (float): step width
+
+    Returns:
+        tuple: y_p (integrated value), calculation time
+    """
+    time_start = time.perf_counter()
+    # === Implement here ===
+    k1 = dy_dt(t        , y           )
+    k2 = dy_dt(t + (h/2), y + h*(k1/2))
+    k3 = dy_dt(t + (h/2), y + h*(k2/2))
+    k4 = dy_dt(t + h    , y + h*k3    )
+
+    y_p = y + (h/6)*(k1 +2*k2 + 2*k3 + k4)
+    # =====================
+    time_end = time.perf_counter()
+    return y_p, time_end - time_start
+
+def rk4_all_step(h: float, times: np.array, dy_dt) -> tuple:
+    """RK4 all step
+
+    Args:
+        h (float): step width
+        times (np.array): array of time
+        dy_dy (function): equation of motion
+
+    Returns:
+        tuple: y_rk4 (array of integrated values), calc_times_rk4 (array of calculation time)
+    """
+    y_rk4 = np.zeros((len(times), 6))
+    y_rk4_i = y0
+
+    calc_time_rk4 = 0
+    calc_times_rk4 = [calc_time_rk4]
+    y_rk4[0] = y_rk4_i
+
+    for i in range(len(times) - 1):
+        t = times[i]
+
+        y_rk4_i, calc_time_i = runge_kutta_4(t, y_rk4_i, h, dy_dt)
+        y_rk4[i + 1] = y_rk4_i
+
+        calc_time_rk4 += calc_time_i
+        calc_times_rk4.append(calc_time_rk4)
+
+    # output total calculation time
+    print("RK4 time: ", calc_times_rk4[-1])
+    return y_rk4, calc_times_rk4
+# ===========================
+
+
 # =========== ABM4 ===========
 def adams_4(t, y, h: float, f_m: list, dy_dt) -> tuple:
     """Adams-Bashforth-Moulton4 integrator
