@@ -19,13 +19,9 @@ T_orb = 2 * np.pi / n  # Orbital period
 
 y0 = np.array([10000, 10000, 10000, 0, 0, 0]) #m, m/s
 
-
-
 max_thrust = 0.07  # m/s²
-# Simulation parameters
-t0, tf = 0, 0  # Simulate for 2 orbits
+t0, tf = 0, 0  
 N = 0
-
 
 # System matrices for CW equations
 A = np.array([
@@ -317,28 +313,30 @@ def thrust_func_optimal(t, y):
 # SELECT ACTIVE CONTROLLER HERE
 # ===========================================================================
 
-# thrust_func = thrust_func_pd                    # PD Controller
-thrust_func = thrust_func_lqr_fuel_optimised    # Fuel-optimised LQR
-# thrust_func = thrust_func_optimal               # Method 6: Optimal Control
+thrust_func = thrust_func_pd                    # PD Controller
+# thrust_func = thrust_func_lqr_fuel_optimised    # Fuel-optimised LQR
+# thrust_func = thrust_func_optimal               # Optimal Control
+
+
+
+
 
 # ===========================================================================
 # DYNAMICS AND SIMULATION 
 # ===========================================================================
 
-
-
 if thrust_func == thrust_func_pd:
-    t0, tf = 0, 1*T_orb  # Simulate for 2 orbits
+    t0, tf = 0, 1*T_orb  
     N = 2000
     times_docking = np.linspace(t0, tf, N)
     h_docking = times_docking[1] - times_docking[0]
 elif thrust_func == thrust_func_lqr_fuel_optimised:
-    t0, tf = 0, 10*T_orb  # Simulate for 2 orbits
+    t0, tf = 0, 10*T_orb  
     N = 2000
     times_docking = np.linspace(t0, tf, N)
     h_docking = times_docking[1] - times_docking[0]
 else:
-    t0, tf = 0, 1*T_orb  # Simulate for 2 orbits
+    t0, tf = 0, 1*T_orb  
     N = 200
     times_docking = np.linspace(t0, tf, N)
     h_docking = times_docking[1] - times_docking[0]
@@ -351,7 +349,6 @@ else:
 def dy_dt(t, y):
     thrust = thrust_func(t, y)
     
-    # Direct implementation of CW equations
     x, y_pos, z, vx, vy, vz = y
     
     dxdt = vx
@@ -366,9 +363,6 @@ def dy_dt(t, y):
 
 
 
-
-
-
 print("Starting docking simulation...")
 print(f"Using controller: {thrust_func.__name__}")
 
@@ -376,16 +370,16 @@ print(f"Using controller: {thrust_func.__name__}")
 if thrust_func == thrust_func_optimal and optimal_controller.optimised:
     print("Plotting optimal control results from pre-computed solution...")
     
-    # Use the already computed trajectory from the optimization
+    # Use precomputed result
     U_flat = optimal_controller.control_profile.flatten()
     Y_optimised = optimal_controller.simulate_trajectory(U_flat)
     Y_optimised = Y_optimised.T  
     
-    # Extract results from pre-computed optimal solution
+    # Extract results
     positions = Y_optimised[:, :3]
     velocities = Y_optimised[:, 3:]
     
-    # Calculate metrics using the optimal control profile
+    # Calculate metric
     thrust_profile = optimal_controller.control_profile.T  # Transpose to (N, 3)
     distances = np.linalg.norm(positions, axis=1)
     rel_velocities = np.linalg.norm(velocities, axis=1)
@@ -419,17 +413,21 @@ else:
     rel_velocities = np.zeros(len(times_docking))
     performance_index = np.zeros(len(times_docking))
 
-    # Calculate performance index - match the objective function J = 1/2∫uTu dt
-    performance_index = np.zeros(len(times_docking))
     total_J = 0
+    
+    
     for i in range(len(times_docking)):
+        thrust_profile[i] = thrust_func(times_docking[i], y_abm4_docking[i])
+        distances[i] = np.linalg.norm(positions[i])
+        rel_velocities[i] = np.linalg.norm(velocities[i])
+        
         if i > 0:
             dt = times_docking[i] - times_docking[i-1]
             u_prev = thrust_profile[i-1]
             u_curr = thrust_profile[i]
-            # J = 1/2∫uTu dt ≈ 1/2 × [trapezoidal rule of u^2]
+            # J = ½∫uᵀu dt ≈ ½ × [trapezoidal rule of u^2]
             trapezoidal_integral = 0.5 * dt * (np.dot(u_prev, u_prev) + np.dot(u_curr, u_curr))
-            total_J += 0.5 * trapezoidal_integral  # Add the 1/2 factor
+            total_J += 0.5 * trapezoidal_integral  # Add the ½ factor
         performance_index[i] = total_J
 
 

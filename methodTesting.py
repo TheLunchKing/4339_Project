@@ -220,8 +220,10 @@ def dormand_prince_8_step(t, y, h: float, dy_dt) -> tuple:
     # Compute intermediate stages
     for i in range(1, 10):
         y_stage = y.copy()
+        for m in y_stage:
+            float(m)
         for j in range(i):
-            y_stage += h * a[i][j] * k[j]
+            y_stage += float(h * a[i][j] * k[j])
         k[i] = dy_dt(t + c[i] * h, y_stage)
     
     # 8th order solution
@@ -276,7 +278,7 @@ def compare_methods():
     # Test setup
     y0_test = np.array([10, 10, 10, 0, 0, 0])  # km, km/s
     t0, tf = 0, T_orb
-    N = 2000
+    N = 6000
     period = np.linspace(t0, tf, N)
     h = period[1] - period[0]
     
@@ -416,10 +418,10 @@ if __name__ == "__main__":
     print(f"Orbital rate: {n:.6f} rad/s")
     
     # Compare all methods
-    # compare_methods()
+    compare_methods()
     
     # Test a specific method
-    test_single_method('ABM4')  
+    # test_single_method('ABM4')  
 
 
 
