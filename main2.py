@@ -6,6 +6,7 @@ import numpy as np
 import scipy.integrate as sp
 from scipy.linalg import solve_continuous_are
 from scipy.optimize import minimize
+from scipy.interpolate import interp1d
 
 import methodTesting as mt
 
@@ -24,7 +25,7 @@ kp = 5e-5  # Position gain
 kd = 1e-2  # Velocity gain
 max_thrust = 0.07  # m/s²
 # Simulation parameters
-t0, tf = 0, (2/3)*T_orb  # Simulate for 2 orbits
+t0, tf = 0, 10*T_orb  # Simulate for 2 orbits
 N = 2000
 times_docking = np.linspace(t0, tf, N)
 h_docking = times_docking[1] - times_docking[0]
@@ -50,12 +51,12 @@ B = np.array([
 ])
 
 # ============================================================================
-# METHOD 1: PD CONTROLLER
+# PD CONTROLLER
 # ============================================================================
 def thrust_func_pd(t, y):
     """PD Controller - Simple but effective"""
-    kp = 5e-5  # Position gain
-    kd = 1e-2  # Velocity gain
+    kp = 42e-6  # Position gain
+    kd = 3e-2  # Velocity gain
     
     target_pos = np.array([0.0, 0.0, 0.0])
     target_vel = np.array([0.0, 0.0, 0.0])
@@ -75,35 +76,16 @@ def thrust_func_pd(t, y):
         
     return u
 
-# ============================================================================
-# METHOD 2: LQR CONTROLLER  
-# ============================================================================
-def thrust_func_lqr(t, y):
-    """LQR Controller - Optimal for linear systems"""
-    # Moderate weights - balance between fuel and performance
-    Q = np.diag([1e-3, 1e-3, 1e-3, 1e-1, 1e-1, 1e-1])  
-    R = np.diag([1e3, 1e3, 1e3])
-    
-    P = solve_continuous_are(A, B, Q, R)
-    K = np.linalg.inv(R) @ B.T @ P
-    
-    u = -K @ y
-    
-    # Saturate thrust
-    u_norm = np.linalg.norm(u)
-    if u_norm > max_thrust:
-        u = u * (max_thrust / u_norm)
-        
-    return u
+
 
 # ============================================================================
-# METHOD 3: FUEL-OPTIMISED LQR
+# FUEL-OPTIMISED LQR
 # ============================================================================
 def thrust_func_lqr_fuel_optimised(t, y):
     """LQR with heavy control penalty to minimise fuel usage"""
     # Light state penalties, heavy control penalties
     Q = np.diag([1e-4, 1e-4, 1e-4, 1e-2, 1e-2, 1e-2])  
-    R = np.diag([1e4, 1e4, 1e4])  # Very high control penalty
+    R = np.diag([1e9, 1e9, 1e9])  # Very high control penalty
     
     P = solve_continuous_are(A, B, Q, R)
     K = np.linalg.inv(R) @ B.T @ P
@@ -117,79 +99,24 @@ def thrust_func_lqr_fuel_optimised(t, y):
         
     return u
 
-# ============================================================================
-# METHOD 4: TIME-VARYING LQR (TVLQR)
-# ============================================================================
-def thrust_func_tvlqr(t, y):
-    """Time-varying LQR - accounts for changing dynamics"""
-    # Time-varying weights - more aggressive near docking
-    time_factor = min(1.0, t / (0.8 * tf))  # Ramp up over 80% of trajectory
-    
-    Q = np.diag([1e-3 * (1 + 9 * time_factor), 
-                 1e-3 * (1 + 9 * time_factor), 
-                 1e-3 * (1 + 9 * time_factor),
-                 1e-1 * (1 + 9 * time_factor),
-                 1e-1 * (1 + 9 * time_factor), 
-                 1e-1 * (1 + 9 * time_factor)])
-    
-    R = np.diag([1e3, 1e3, 1e3])
-    
-    P = solve_continuous_are(A, B, Q, R)
-    K = np.linalg.inv(R) @ B.T @ P
-    
-    u = -K @ y
-    
-    # Saturate thrust
-    u_norm = np.linalg.norm(u)
-    if u_norm > max_thrust:
-        u = u * (max_thrust / u_norm)
-        
-    return u
 
-# ============================================================================
-# METHOD 5: SLIDING MODE CONTROL (SMC)
-# ============================================================================
-def thrust_func_smc(t, y):
-    """Sliding Mode Control - Robust to uncertainties"""
-    lambda_smc = 0.1  # Sliding surface parameter
-    
-    # Sliding surface: s = λ*pos_error + vel_error
-    pos_error = y[:3]
-    vel_error = y[3:]
-    s = lambda_smc * pos_error + vel_error
-    
-    # SMC control law
-    k_smc = 0.01
-    u = -lambda_smc * vel_error - k_smc * np.sign(s)
-    
-    # Add CW dynamics compensation
-    x, y_pos, z, vx, vy, vz = y
-    u[0] -= (3*n**2*x + 2*n*vy)
-    u[1] -= (-2*n*vx) 
-    u[2] -= (-n**2*z)
-    
-    # Saturate thrust
-    u_norm = np.linalg.norm(u)
-    if u_norm > max_thrust:
-        u = u * (max_thrust / u_norm)
-        
-    return u
 
-# ============================================================================
-# METHOD 6: OPTIMAL CONTROL VIA DIRECT COLLOCATION (MOST FUEL EFFICIENT)
-# ============================================================================
+
+# ==============================================================================
+# OPTIMAL CONTROL VIA DIRECT COLLOCATION
+# ==============================================================================
+class OptimizationConverged(Exception):
+    pass
 class OptimalControlDocking:
     def __init__(self, times, y0, max_thrust=0.07):
         self.times = times
         self.y0 = y0
         self.max_thrust = max_thrust
-        self.N = min(200, len(times))
-        self.times = np.linspace(times[0], times[-1], self.N)
+        self.N = 200 
         self.dt = self.times[1] - self.times[0]
         self.control_profile = None
-        self.optimises = False
+        self.optimised = False
         
-        # System matrices
         self.A = np.array([
             [0, 0, 0, 1, 0, 0],
             [0, 0, 0, 0, 1, 0], 
@@ -228,34 +155,33 @@ class OptimalControlDocking:
             
     #     return Y
 
-    def simulate_trajectory(self, U_flat):
-        """Simulate trajectory given control sequence using ABM4"""
-        U = U_flat.reshape(3, self.N)
-        
-        # Create a closure that captures the control sequence
-        def dy_dt_with_controls(t, y):
-            # Find the nearest control index
-            idx = min(int(t / self.dt), self.N-1)
-            current_u = U[:, idx]
-            return self.dynamics(y, current_u)
-        
-        # Use your existing ABM4 function
-        y_abm4, calc_times_abm4 = mt.abm4_all_step(self.dt, self.times, dy_dt_with_controls, self.y0)
-        
-        # Transpose to match original shape (6, N) instead of (N, 6)
-        return y_abm4.T  # or y_abm4.T depending on your ABM4 output shape
-    
     # def simulate_trajectory(self, U_flat):
-    #     """Faster Euler integration for optimisation"""
+    #     """Simulate trajectory given control sequence using ABM4"""
     #     U = U_flat.reshape(3, self.N)
-    #     Y = np.zeros((6, self.N))
-    #     Y[:, 0] = self.y0
         
-    #     for k in range(self.N-1):
-    #         # Euler method (faster than RK4)
-    #         Y[:, k+1] = Y[:, k] + self.dt * self.dynamics(Y[:, k], U[:, k])
+    #     # Create a closure that captures the control sequence
+    #     def dy_dt_with_controls(t, y):
+    #         # Find the nearest control index
+    #         idx = min(int(t / self.dt), self.N-1)
+    #         current_u = U[:, idx]
+    #         return self.dynamics(y, current_u)
         
-    #     return Y
+    #     y_abm4, calc_times_abm4 = mt.abm4_all_step(self.dt, self.times, dy_dt_with_controls, self.y0)
+        
+    #     # Transpose to match original shape (6, N) instead of (N, 6)
+    #     return y_abm4.T  # or y_abm4.T depending on your ABM4 output shape
+    
+    def simulate_trajectory(self, U_flat):
+        """Faster Euler integration for optimisation"""
+        U = U_flat.reshape(3, self.N)
+        Y = np.zeros((6, self.N))
+        Y[:, 0] = self.y0
+        
+        for k in range(self.N-1):
+            # Euler method (faster than RK4)
+            Y[:, k+1] = Y[:, k] + self.dt * self.dynamics(Y[:, k], U[:, k])
+        
+        return Y
     
     def objective(self, U_flat):
         """Performance index J = ½∫uᵀu dt"""
@@ -268,17 +194,17 @@ class OptimalControlDocking:
         final_pos = Y[:3, -1]
         final_vel = Y[3:, -1]
         
-        # Position < 1m, velocity < 0.01 m/s
-        pos_constraint = 10 - np.linalg.norm(final_pos)
-        vel_constraint = 0.5 - np.linalg.norm(final_vel)
+        # Position < 5m, velocity < 0.25 m/s
+        pos_constraint = 5 - np.linalg.norm(final_pos)
+        vel_constraint = 0.25 - np.linalg.norm(final_vel)
         
         return np.array([pos_constraint, vel_constraint])
     
-    def optimse_control(self):
+    def optimise_control(self):
         print("Solving optimal control problem...")
         
-        # Initial guess: zero control
-        U0_flat = np.zeros(3 * self.N)
+        # Initial guess
+        U0_flat = np.zeros(3*self.N)
         
         # Bounds: control constraints
         bounds = [(-self.max_thrust, self.max_thrust) for _ in range(3 * self.N)]
@@ -292,7 +218,8 @@ class OptimalControlDocking:
         # Options for better convergence
         options = {
             'maxiter': 10000,
-            'ftol': 1e-4,
+            'ftol': 1e-2,
+            'eps': 1e-8,
             'disp': True
         }
 
@@ -313,23 +240,39 @@ class OptimalControlDocking:
                 constr_status = "SATISFIED"
             else:
                 constr_status = f"VIOLATED by {constr_violation:.2e}"
+            
+            Y_current = self.simulate_trajectory(xk)
+            final_pos = np.linalg.norm(Y_current[:3, -1])
+            final_vel = np.linalg.norm(Y_current[3:, -1])
                 
-            print(f"Iteration {self.iteration_count}: J = {current_j:.6f}, Constraints: {constr_status}")
+            print(f"Iteration {self.iteration_count}: J = {current_j:.6f}, Constraints: {constr_status}, p = {final_pos}, v = {final_vel}")
             
             # Stops optimisation if goals are reached
-            if current_j < 1 and constr_violation < 0:
+            if current_j < 0.35 and constr_violation < 0.1:
                 print("Converged to satisfactory solution!")
-                return True 
+                self.best_solution = xk.copy()
+                raise OptimizationConverged("Optimal solution found")
+            else:
+                return False
         
-        result = minimize(
-            self.objective, 
-            U0_flat,
-            method='SLSQP',
-            bounds=bounds,
-            constraints=constraints,
-            callback=callback,  
-            options=options
-        )
+        try:
+            result = minimize(
+                self.objective, 
+                U0_flat,
+                method='SLSQP',
+                bounds=bounds,
+                constraints=constraints,
+                callback=callback,  
+                options=options
+            )
+        except OptimizationConverged:
+            result = type('obj', (object,), {
+                'success': True, 
+                'x': self.best_solution,
+                'fun': self.objective(self.best_solution),
+                'message': 'Optimization stopped early - good solution found'
+                })()
+            
         print("minimised successfully")
         
         if result.success:
@@ -347,66 +290,39 @@ class OptimalControlDocking:
             print(f"Final velocity: {final_vel:.3f} m/s") 
             print(f"Performance index J: {J_value:.6f}")
         else:
-            print(f"Optimsation failed: {result.message}")
+            print(f"Optimisation failed: {result.message}")
             # Fallback to LQR
             self._setup_lqr_fallback()
             
         return self.control_profile
     
-    def _setup_lqr_fallback(self):
-        """Fallback to LQR if optimisation fails"""
-        print("Using LQR fallback...")
-        Q = np.diag([1e-3, 1e-3, 1e-3, 1e-1, 1e-1, 1e-1])
-        R = np.diag([1e3, 1e3, 1e3])
-        P = solve_continuous_are(self.A, self.B, Q, R)
-        K = np.linalg.inv(R) @ self.B.T @ P
-        
-        # Generate LQR control sequence
-        self.control_profile = np.zeros((3, self.N))
-        Y = np.zeros((6, self.N))
-        Y[:, 0] = self.y0
-        
-        for k in range(self.N):
-            u = -K @ Y[:, k]
-            u_norm = np.linalg.norm(u)
-            if u_norm > self.max_thrust:
-                u = u * (self.max_thrust / u_norm)
-            self.control_profile[:, k] = u
-            
-            if k < self.N-1:
-                # Simple Euler integration for fallback
-                Y[:, k+1] = Y[:, k] + self.dt * self.dynamics(Y[:, k], u)
-        
-        self.optimises = True
+    
     
     def get_control(self, t):
         """Get optimal control at time t"""
-        if not self.optimises:
+        if not self.optimised:
             return np.zeros(3)
             
         # Find nearest time index
         idx = min(int(t / self.dt), self.N-1)
         return self.control_profile[:, idx]
 
-# Initialise and optimise:
+    # Initialise and optimise:
 optimal_controller = OptimalControlDocking(times_docking, y0, max_thrust)
-optimal_controller.optimse_control()
+optimal_controller.optimise_control()
 
 
 # Usage:
 def thrust_func_optimal(t, y):
-    """Optimal control wrapper function"""
+    """Optimal control wrapper function"""    
     return optimal_controller.get_control(t)
 
 # ===========================================================================
 # SELECT ACTIVE CONTROLLER HERE
 # ===========================================================================
 
-# thrust_func = thrust_func_pd                    # Method 1: PD Controller
-# thrust_func = thrust_func_lqr                   # doesn't work 
-# thrust_func = thrust_func_lqr_fuel_optimised    # Method 3: Fuel-optimised LQR
-# thrust_func = thrust_func_tvlqr                 # deosn't work
-# thrust_func = thrust_func_smc                   # doesn't work
+# thrust_func = thrust_func_pd                    # PD Controller
+# thrust_func = thrust_func_lqr_fuel_optimised    # Fuel-optimised LQR
 thrust_func = thrust_func_optimal               # Method 6: Optimal Control
 
 # ===========================================================================
