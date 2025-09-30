@@ -7,6 +7,8 @@ import scipy.integrate as sp
 from scipy.linalg import solve_continuous_are
 from scipy.optimize import minimize
 
+import methodTesting as mt
+
 
 mu = 3.986e14 # m^3/s^2
 a_iss = 6770e3  # Semi-major plotis of ISS in meters
@@ -95,10 +97,10 @@ def thrust_func_lqr(t, y):
     return u
 
 # ============================================================================
-# METHOD 3: FUEL-OPTIMIZED LQR
+# METHOD 3: FUEL-OPTIMISED LQR
 # ============================================================================
-def thrust_func_lqr_fuel_optimized(t, y):
-    """LQR with heavy control penalty to minimize fuel usage"""
+def thrust_func_lqr_fuel_optimised(t, y):
+    """LQR with heavy control penalty to minimise fuel usage"""
     # Light state penalties, heavy control penalties
     Q = np.diag([1e-4, 1e-4, 1e-4, 1e-2, 1e-2, 1e-2])  
     R = np.diag([1e4, 1e4, 1e4])  # Very high control penalty
@@ -181,10 +183,11 @@ class OptimalControlDocking:
         self.times = times
         self.y0 = y0
         self.max_thrust = max_thrust
-        self.N = len(times)
-        self.dt = times[1] - times[0]
+        self.N = min(200, len(times))
+        self.times = np.linspace(times[0], times[-1], self.N)
+        self.dt = self.times[1] - self.times[0]
         self.control_profile = None
-        self.optimized = False
+        self.optimises = False
         
         # System matrices
         self.A = np.array([
@@ -209,21 +212,50 @@ class OptimalControlDocking:
         """CW dynamics with control input"""
         return self.A @ y + self.B @ u
     
-    def simulate_trajectory(self, U_flat):
-        """Simulate trajectory given control sequence"""
-        U = U_flat.reshape(3, self.N)
-        Y = np.zeros((6, self.N))
-        Y[:, 0] = self.y0
+    # def simulate_trajectory(self, U_flat):
+    #     """Simulate trajectory given control sequence"""
+    #     U = U_flat.reshape(3, self.N)
+    #     Y = np.zeros((6, self.N))
+    #     Y[:, 0] = self.y0
         
-        for k in range(self.N-1):
-            # RK4 integration
-            k1 = self.dynamics(Y[:, k], U[:, k])
-            k2 = self.dynamics(Y[:, k] + 0.5*self.dt*k1, U[:, k])
-            k3 = self.dynamics(Y[:, k] + 0.5*self.dt*k2, U[:, k]) 
-            k4 = self.dynamics(Y[:, k] + self.dt*k3, U[:, k])
-            Y[:, k+1] = Y[:, k] + (self.dt/6) * (k1 + 2*k2 + 2*k3 + k4)
+    #     for k in range(self.N-1):
+    #         # RK4 integration
+    #         k1 = self.dynamics(Y[:, k], U[:, k])
+    #         k2 = self.dynamics(Y[:, k] + 0.5*self.dt*k1, U[:, k])
+    #         k3 = self.dynamics(Y[:, k] + 0.5*self.dt*k2, U[:, k]) 
+    #         k4 = self.dynamics(Y[:, k] + self.dt*k3, U[:, k])
+    #         Y[:, k+1] = Y[:, k] + (self.dt/6) * (k1 + 2*k2 + 2*k3 + k4)
             
-        return Y
+    #     return Y
+
+    def simulate_trajectory(self, U_flat):
+        """Simulate trajectory given control sequence using ABM4"""
+        U = U_flat.reshape(3, self.N)
+        
+        # Create a closure that captures the control sequence
+        def dy_dt_with_controls(t, y):
+            # Find the nearest control index
+            idx = min(int(t / self.dt), self.N-1)
+            current_u = U[:, idx]
+            return self.dynamics(y, current_u)
+        
+        # Use your existing ABM4 function
+        y_abm4, calc_times_abm4 = mt.abm4_all_step(self.dt, self.times, dy_dt_with_controls, self.y0)
+        
+        # Transpose to match original shape (6, N) instead of (N, 6)
+        return y_abm4.T  # or y_abm4.T depending on your ABM4 output shape
+    
+    # def simulate_trajectory(self, U_flat):
+    #     """Faster Euler integration for optimisation"""
+    #     U = U_flat.reshape(3, self.N)
+    #     Y = np.zeros((6, self.N))
+    #     Y[:, 0] = self.y0
+        
+    #     for k in range(self.N-1):
+    #         # Euler method (faster than RK4)
+    #         Y[:, k+1] = Y[:, k] + self.dt * self.dynamics(Y[:, k], U[:, k])
+        
+    #     return Y
     
     def objective(self, U_flat):
         """Performance index J = ½∫uᵀu dt"""
@@ -236,14 +268,13 @@ class OptimalControlDocking:
         final_pos = Y[:3, -1]
         final_vel = Y[3:, -1]
         
-        # Position < 10m, velocity < 0.5 m/s
+        # Position < 1m, velocity < 0.01 m/s
         pos_constraint = 10 - np.linalg.norm(final_pos)
         vel_constraint = 0.5 - np.linalg.norm(final_vel)
         
         return np.array([pos_constraint, vel_constraint])
     
-    def optimize_control(self):
-        """Solve the optimal control problem"""
+    def optimse_control(self):
         print("Solving optimal control problem...")
         
         # Initial guess: zero control
@@ -260,24 +291,50 @@ class OptimalControlDocking:
         
         # Options for better convergence
         options = {
-            'maxiter': 1000,
-            'ftol': 1e-6,
+            'maxiter': 10000,
+            'ftol': 1e-4,
             'disp': True
         }
+
+
+        print("minimising...")
+        # Solve optimisation
+        self.iteration_count = 0
+        self.j_values = []
         
-        # Solve optimization
+        def callback(xk):
+            self.iteration_count += 1
+            current_j = self.objective(xk)
+            self.j_values.append(current_j)
+            
+            # Check constraints
+            constr_violation = -np.min(self.constraints(xk))  # Negative = violation
+            if constr_violation < 0:
+                constr_status = "SATISFIED"
+            else:
+                constr_status = f"VIOLATED by {constr_violation:.2e}"
+                
+            print(f"Iteration {self.iteration_count}: J = {current_j:.6f}, Constraints: {constr_status}")
+            
+            # Stops optimisation if goals are reached
+            if current_j < 1 and constr_violation < 0:
+                print("Converged to satisfactory solution!")
+                return True 
+        
         result = minimize(
             self.objective, 
-            U0_flat, 
+            U0_flat,
             method='SLSQP',
             bounds=bounds,
             constraints=constraints,
+            callback=callback,  
             options=options
         )
+        print("minimised successfully")
         
         if result.success:
             self.control_profile = result.x.reshape(3, self.N)
-            self.optimized = True
+            self.optimised = True
             
             # Verify solution
             Y = self.simulate_trajectory(result.x)
@@ -290,14 +347,14 @@ class OptimalControlDocking:
             print(f"Final velocity: {final_vel:.3f} m/s") 
             print(f"Performance index J: {J_value:.6f}")
         else:
-            print(f"Optimization failed: {result.message}")
+            print(f"Optimsation failed: {result.message}")
             # Fallback to LQR
             self._setup_lqr_fallback()
             
         return self.control_profile
     
     def _setup_lqr_fallback(self):
-        """Fallback to LQR if optimization fails"""
+        """Fallback to LQR if optimisation fails"""
         print("Using LQR fallback...")
         Q = np.diag([1e-3, 1e-3, 1e-3, 1e-1, 1e-1, 1e-1])
         R = np.diag([1e3, 1e3, 1e3])
@@ -320,20 +377,21 @@ class OptimalControlDocking:
                 # Simple Euler integration for fallback
                 Y[:, k+1] = Y[:, k] + self.dt * self.dynamics(Y[:, k], u)
         
-        self.optimized = True
+        self.optimises = True
     
     def get_control(self, t):
         """Get optimal control at time t"""
-        if not self.optimized:
+        if not self.optimises:
             return np.zeros(3)
             
         # Find nearest time index
         idx = min(int(t / self.dt), self.N-1)
         return self.control_profile[:, idx]
 
-# Initialize and optimize:
+# Initialise and optimise:
 optimal_controller = OptimalControlDocking(times_docking, y0, max_thrust)
-optimal_controller.optimize_control()
+optimal_controller.optimse_control()
+
 
 # Usage:
 def thrust_func_optimal(t, y):
@@ -345,11 +403,11 @@ def thrust_func_optimal(t, y):
 # ===========================================================================
 
 # thrust_func = thrust_func_pd                    # Method 1: PD Controller
-# thrust_func = thrust_func_lqr                    # Method 2: Standard LQR  
-# thrust_func = thrust_func_lqr_fuel_optimized    # Method 3: Fuel-optimized LQR
-# thrust_func = thrust_func_tvlqr                 # Method 4: Time-varying LQR
-thrust_func = thrust_func_smc                   # Method 5: Sliding Mode Control
-# thrust_func = thrust_func_optimal               # Method 6: Optimal Control
+# thrust_func = thrust_func_lqr                   # doesn't work 
+# thrust_func = thrust_func_lqr_fuel_optimised    # Method 3: Fuel-optimised LQR
+# thrust_func = thrust_func_tvlqr                 # deosn't work
+# thrust_func = thrust_func_smc                   # doesn't work
+thrust_func = thrust_func_optimal               # Method 6: Optimal Control
 
 # ===========================================================================
 # DYNAMICS AND SIMULATION (UNCHANGED)
@@ -373,154 +431,14 @@ def dy_dt(t, y):
 
 
 
-# =========== RK4 ===========
-def runge_kutta_4(t, y, h: float, dy_dt) -> tuple:
-    """RK4 integrator
-
-    Args:
-        t (float): time
-        y (_type_): state variables
-        h (float): step width
-
-    Returns:
-        tuple: y_p (integrated value), calculation time
-    """
-    time_start = time.perf_counter()
-    # === Implement here ===
-    k1 = dy_dt(t        , y           )
-    k2 = dy_dt(t + (h/2), y + h*(k1/2))
-    k3 = dy_dt(t + (h/2), y + h*(k2/2))
-    k4 = dy_dt(t + h    , y + h*k3    )
-
-    y_p = y + (h/6)*(k1 +2*k2 + 2*k3 + k4)
-    # =====================
-    time_end = time.perf_counter()
-    return y_p, time_end - time_start
-
-def rk4_all_step(h: float, times: np.array, dy_dt) -> tuple:
-    """RK4 all step
-
-    Args:
-        h (float): step width
-        times (np.array): array of time
-        dy_dy (function): equation of motion
-
-    Returns:
-        tuple: y_rk4 (array of integrated values), calc_times_rk4 (array of calculation time)
-    """
-    y_rk4 = np.zeros((len(times), 6))
-    y_rk4_i = y0
-
-    calc_time_rk4 = 0
-    calc_times_rk4 = [calc_time_rk4]
-    y_rk4[0] = y_rk4_i
-
-    for i in range(len(times) - 1):
-        t = times[i]
-
-        y_rk4_i, calc_time_i = runge_kutta_4(t, y_rk4_i, h, dy_dt)
-        y_rk4[i + 1] = y_rk4_i
-
-        calc_time_rk4 += calc_time_i
-        calc_times_rk4.append(calc_time_rk4)
-
-    # output total calculation time
-    print("RK4 time: ", calc_times_rk4[-1])
-    return y_rk4, calc_times_rk4
-# ===========================
 
 
-# =========== ABM4 ===========
-def adams_4(t, y, h: float, f_m: list, dy_dt) -> tuple:
-    """Adams-Bashforth-Moulton4 integrator
-
-    Args:
-        t (float): time
-        y (_type_): state variables
-        h (float): step width
-        f_m (list): previous steps' derivatives
-
-    Returns:
-        tuple: y_p (integrated value), calculation time
-    """
-    time_start = time.perf_counter()
-    # === Implement here ===
-
-    fi = dy_dt(t,y) 
-
-    y_pred = y + (h/24)*(55*fi - 59*f_m[-1] + 37*f_m[-2] - 9*f_m[-3] )
-
-    fi1 = dy_dt(t+h,y_pred) 
-
-    y_p = y + (h/720)*(251*fi1 + 646*fi - 264*f_m[-1] + 106*f_m[-2] - 19*f_m[-3])
-
-    f_m.append(fi)
-    if len(f_m) > 4:
-        f_m.pop(0)
-    
-    # ======================
-    time_end = time.perf_counter()
-    return y_p, time_end - time_start
-
-def abm4_all_step(h: float, times: np.array, dy_dt, y) -> tuple:
-    """ABM4 all step
-
-    Args:
-        h (float): step width
-        times (np.array): array of time
-        dy_dy (function): equation of motion
-
-    Returns:
-        tuple: y_abm4 (array of integrated values), calc_times_abm4 (array of calculation time)
-    """
-    fm_ab4 = []
-
-    y_abm4 = np.zeros((len(times), 6))
-    y_abm4_i = y
-    y_abm4[0] = y_abm4_i
-
-    calc_time_abm4 = 0
-    calc_times_abm4 = [calc_time_abm4]
-
-    # Initialization of 3 steps for ABM4
-    for i in range(3):
-        t = times[i]
-        fm_ab4.append(dy_dt(t, y_abm4_i))
-        y_abm4_i, calc_time_i = runge_kutta_4(t, y_abm4_i, h, dy_dt)
-
-        y_abm4[i + 1] = y_abm4_i
-
-        calc_time_abm4 += calc_time_i
-        calc_times_abm4.append(calc_time_abm4)
-
-    # Integration with ABM4
-    for i in range(len(times) - 3 - 1):
-        t = times[i + 3]
-
-        y_abm4_i, calc_time_i = adams_4(t, y_abm4_i, h, fm_ab4, dy_dt)
-
-        y_abm4[i + 4] = y_abm4_i
-
-        calc_time_abm4 += calc_time_i
-        calc_times_abm4.append(calc_time_abm4)
-
-    # output total calculation time
-    print("ABM4 time: ", calc_times_abm4[-1])
-    return y_abm4, calc_times_abm4
-# ===========================
-
-
-
-
-# Pre-compute optimal control if using that method
-if thrust_func == thrust_func_optimal:
-    optimal_controller.optimize_control(y0, times_docking)
 
 print("Starting docking simulation...")
 print(f"Using controller: {thrust_func.__name__}")
 
 # Simulate docking using ABM4
-y_abm4_docking, _ = abm4_all_step(h_docking, times_docking, dy_dt, y0)
+y_abm4_docking, _ = mt.abm4_all_step(h_docking, times_docking, dy_dt, y0)
 
 # Extract results
 positions = y_abm4_docking[:, :3]
@@ -573,7 +491,7 @@ ax1.grid(True)
 
 # Plot 2: Distance vs time
 ax2 = fig.add_subplot(2, 3, 2)
-ax2.plot(times_docking/T_orb, distances)
+ax2.semilogy(times_docking/T_orb, distances)
 ax2.axhline(y=10, color='r', linestyle='--', label='Docking threshold (10m)')
 ax2.set_xlabel('Time (orbits)')
 ax2.set_ylabel('Distance (m)')

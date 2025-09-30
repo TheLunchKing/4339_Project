@@ -112,7 +112,7 @@ def abm4_all_step(h: float, times: np.array, dy_dt, y0) -> tuple:
         calc_time_abm4 += calc_time_i
         calc_times_abm4.append(calc_time_abm4)
 
-    print("ABM4 time: ", calc_times_abm4[-1])
+    # print("ABM4 time: ", calc_times_abm4[-1])
     return y_abm4, calc_times_abm4
 
 # ============ VELOCITY VERLET  ============
@@ -293,7 +293,7 @@ def compare_methods():
     )
     
     # Methods to test
-    methods = ['RK4', 'ABM4', 'VELOCITY_VERLET', 'RK4_HP', 'SCIPY_DOP853']
+    methods = ['RK4', 'ABM4', 'VELOCITY_VERLET', 'RK4_HP']
     colors = ['red', 'orange', 'green', 'blue', 'purple']
     
     fig = plt.figure(figsize=(20, 10))
@@ -415,16 +415,13 @@ if __name__ == "__main__":
     print(f"Orbital period: {T_orb:.2f} s")
     print(f"Orbital rate: {n:.6f} rad/s")
     
-    # Uncomment one of the following:
+    # Compare all methods
+    # compare_methods()
     
-    # Option 1: Compare all methods
-    compare_methods()
-    
-    # Option 2: Test a specific method
-    # test_single_method('ABM4')  # Try: 'VELOCITY_VERLET', 'RK4_HP', 'SCIPY_DOP853'
-    
-    # Option 3: Quick test of any method
-    # result, times = integrate('VELOCITY_VERLET', h, period, dy_dt, y0_test)
+    # Test a specific method
+    test_single_method('ABM4')  
+
+
 
 
 # Available methods:
