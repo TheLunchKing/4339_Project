@@ -62,10 +62,6 @@ def dy_dt_w_airdrag(t, y):
     # ======================
     return dy
 
-# return analytical solution of (r, v)
-def y_true(t, tb: TwoBody):
-    r, v = tb.calc_states(t)
-    return np.array([r[0], r[1], r[2], v[0], v[1], v[2]])
 
 
 # =========== RK4 ===========
@@ -157,7 +153,7 @@ def adams_4(t, y, h: float, f_m: list, dy_dt) -> tuple:
     time_end = time.perf_counter()
     return y_p, time_end - time_start
 
-def abm4_all_step(h: float, times: np.array, dy_dt) -> tuple:
+def abm4_all_step(h: float, times: np.array, dy_dt, y) -> tuple:
     """ABM4 all step
 
     Args:
@@ -171,7 +167,7 @@ def abm4_all_step(h: float, times: np.array, dy_dt) -> tuple:
     fm_ab4 = []
 
     y_abm4 = np.zeros((len(times), 6))
-    y_abm4_i = y0
+    y_abm4_i = y
     y_abm4[0] = y_abm4_i
 
     calc_time_abm4 = 0
@@ -207,6 +203,9 @@ def abm4_all_step(h: float, times: np.array, dy_dt) -> tuple:
 
 
 
+#----------------
+# Milestone 1a
+#----------------
 time_start = time.perf_counter()
 sol = sp.solve_ivp(
                     fun = dy_dt,
@@ -217,7 +216,6 @@ sol = sp.solve_ivp(
 time_end = time.perf_counter()
 print(time_end - time_start)
 
-print(sol)
 
 # Extract the results
 states = sol.y.T  # Each row is [x, y, z, ux, uy, uz] at a time step
@@ -229,13 +227,80 @@ y = states[:, 1] / 1000
 z = states[:, 2] / 1000
 
 # Plot the 3D graph
-figure = plt.figure(figsize=(10, 10))
-plot = figure.add_subplot(111, projection='3d')
-plot.plot(x, y, z, label='Ceres path')
-plot.scatter(0, 0, 0, color='red', marker='*', s=50, label='ISS')
-plot.set_xlabel('x (km)')
-plot.set_ylabel('y (km)')
-plot.set_zlabel('z (km)')
-plot.set_title('Trajectory of Ceres relative to ISS (no thrust)')
-plot.legend()
+# figure = plt.figure(figsize=(10, 10))
+# plot = figure.add_subplot(111, projection='3d')
+# plot.plot(x, y, z, label='Ceres path')
+# plot.scatter(0, 0, 0, color='red', marker='*', s=50, label='ISS')
+# plot.set_xlabel('x (km)')
+# plot.set_ylabel('y (km)')
+# plot.set_zlabel('z (km)')
+# plot.set_title('Trajectory of Ceres relative to ISS (no thrust)')
+# plot.legend()
+# plt.show()
+
+
+
+#--------------------------------
+# Milestone 1B
+#--------------------------------
+# Two initial conditions to compare
+y0_1 = np.array([10000, 10000, 10000, 0, 0, 0])  
+y0_2 = np.array([20000,  5000,  5000, 2, 2, 0]) 
+test = enumerate([y0_1, y0_2])   
+
+# Time setup
+t0, tf = 0, T_orb
+N = 1000
+period = np.linspace(t0, tf, N)
+h = period[1] - period[0]
+
+fig = plt.figure(figsize=(15, 10))
+
+# Test both initial conditions
+for num, y0_test in test:
+    sol_ref = sp.solve_ivp(
+        fun=dy_dt,
+        t_span=(t0, tf),
+        y0=y0_test,
+        method='BDF',
+        t_eval=period,
+        rtol=1e-8
+    )
+    
+
+    y_abm4, _ = abm4_all_step(h, period, dy_dt, y0_test)
+    
+    # 3D trajectory comparison
+    ax1 = fig.add_subplot(2, 3, num*3 + 1, projection='3d')
+    ax1.plot(sol_ref.y[0]/1000, sol_ref.y[1]/1000, sol_ref.y[2]/1000, 
+             'b-', label='scipy (BDF)', linewidth=2)
+    ax1.plot(y_abm4[:, 0]/1000, y_abm4[:, 1]/1000, y_abm4[:, 2]/1000, 
+             'r--', label='ABM4', linewidth=1.5)
+    ax1.scatter(0, 0, 0, color='red', marker='*', s=100, label='ISS')
+    ax1.set_xlabel('x (km)')
+    ax1.set_ylabel('y (km)')
+    ax1.set_zlabel('z (km)')
+    ax1.set_title(f'IC: {y0_test[:3]/1000} km')
+    ax1.legend()
+    
+    # Position error over time
+    ax2 = fig.add_subplot(2, 3, num*3 + 2)
+    pos_errors = np.linalg.norm(sol_ref.y[:3].T - y_abm4[:, :3], axis=1)
+    ax2.plot(period/T_orb, pos_errors, 'k-', linewidth=2)
+    ax2.set_xlabel('Time (orbits)')
+    ax2.set_ylabel('Position Error (m)')
+    ax2.set_title('Position Error vs Time')
+    ax2.grid(True)
+    
+    # Velocity error over time  
+    ax3 = fig.add_subplot(2, 3, num*3 + 3)
+    vel_errors = np.linalg.norm(sol_ref.y[3:].T - y_abm4[:, 3:], axis=1)
+    ax3.plot(period/T_orb, vel_errors, 'r-', linewidth=2)
+    ax3.set_xlabel('Time (orbits)')
+    ax3.set_ylabel('Velocity Error (m/s)')
+    ax3.set_title('Velocity Error vs Time')
+    ax3.grid(True)
+
+plt.tight_layout()
 plt.show()
+
