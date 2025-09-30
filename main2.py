@@ -20,15 +20,11 @@ T_orb = 2 * np.pi / n  # Orbital period
 y0 = np.array([10000, 10000, 10000, 0, 0, 0]) #m, m/s
 
 
-# PD Controller parameters
-kp = 5e-5  # Position gain
-kd = 1e-2  # Velocity gain
+
 max_thrust = 0.07  # m/s²
 # Simulation parameters
-t0, tf = 0, 10*T_orb  # Simulate for 2 orbits
-N = 2000
-times_docking = np.linspace(t0, tf, N)
-h_docking = times_docking[1] - times_docking[0]
+t0, tf = 0, 0  # Simulate for 2 orbits
+N = 0
 
 
 # System matrices for CW equations
@@ -54,7 +50,7 @@ B = np.array([
 # PD CONTROLLER
 # ============================================================================
 def thrust_func_pd(t, y):
-    """PD Controller - Simple but effective"""
+    """PD Controller"""
     kp = 42e-6  # Position gain
     kd = 3e-2  # Velocity gain
     
@@ -83,6 +79,7 @@ def thrust_func_pd(t, y):
 # ============================================================================
 def thrust_func_lqr_fuel_optimised(t, y):
     """LQR with heavy control penalty to minimise fuel usage"""
+
     # Light state penalties, heavy control penalties
     Q = np.diag([1e-4, 1e-4, 1e-4, 1e-2, 1e-2, 1e-2])  
     R = np.diag([1e9, 1e9, 1e9])  # Very high control penalty
@@ -248,7 +245,7 @@ class OptimalControlDocking:
             print(f"Iteration {self.iteration_count}: J = {current_j:.6f}, Constraints: {constr_status}, p = {final_pos}, v = {final_vel}")
             
             # Stops optimisation if goals are reached
-            if current_j < 0.35 and constr_violation < 0.1:
+            if current_j < 0.35 and constr_violation < 0.001:
                 print("Converged to satisfactory solution!")
                 self.best_solution = xk.copy()
                 raise OptimizationConverged("Optimal solution found")
@@ -291,8 +288,7 @@ class OptimalControlDocking:
             print(f"Performance index J: {J_value:.6f}")
         else:
             print(f"Optimisation failed: {result.message}")
-            # Fallback to LQR
-            self._setup_lqr_fallback()
+            
             
         return self.control_profile
     
@@ -308,8 +304,8 @@ class OptimalControlDocking:
         return self.control_profile[:, idx]
 
     # Initialise and optimise:
-optimal_controller = OptimalControlDocking(times_docking, y0, max_thrust)
-optimal_controller.optimise_control()
+
+# optimal_controller.optimise_control()
 
 
 # Usage:
@@ -322,12 +318,35 @@ def thrust_func_optimal(t, y):
 # ===========================================================================
 
 # thrust_func = thrust_func_pd                    # PD Controller
-# thrust_func = thrust_func_lqr_fuel_optimised    # Fuel-optimised LQR
-thrust_func = thrust_func_optimal               # Method 6: Optimal Control
+thrust_func = thrust_func_lqr_fuel_optimised    # Fuel-optimised LQR
+# thrust_func = thrust_func_optimal               # Method 6: Optimal Control
 
 # ===========================================================================
-# DYNAMICS AND SIMULATION (UNCHANGED)
+# DYNAMICS AND SIMULATION 
 # ===========================================================================
+
+
+
+if thrust_func == thrust_func_pd:
+    t0, tf = 0, 1*T_orb  # Simulate for 2 orbits
+    N = 2000
+    times_docking = np.linspace(t0, tf, N)
+    h_docking = times_docking[1] - times_docking[0]
+elif thrust_func == thrust_func_lqr_fuel_optimised:
+    t0, tf = 0, 10*T_orb  # Simulate for 2 orbits
+    N = 2000
+    times_docking = np.linspace(t0, tf, N)
+    h_docking = times_docking[1] - times_docking[0]
+else:
+    t0, tf = 0, 1*T_orb  # Simulate for 2 orbits
+    N = 200
+    times_docking = np.linspace(t0, tf, N)
+    h_docking = times_docking[1] - times_docking[0]
+    optimal_controller = OptimalControlDocking(times_docking, y0, max_thrust)
+    optimal_controller.optimise_control()
+
+
+
 
 def dy_dt(t, y):
     thrust = thrust_func(t, y)
@@ -353,32 +372,67 @@ def dy_dt(t, y):
 print("Starting docking simulation...")
 print(f"Using controller: {thrust_func.__name__}")
 
-# Simulate docking using ABM4
-y_abm4_docking, _ = mt.abm4_all_step(h_docking, times_docking, dy_dt, y0)
 
-# Extract results
-positions = y_abm4_docking[:, :3]
-velocities = y_abm4_docking[:, 3:]
-
-# Calculate thrust profile and performance metrics
-thrust_profile = np.zeros((len(times_docking), 3))
-distances = np.zeros(len(times_docking))
-rel_velocities = np.zeros(len(times_docking))
-performance_index = np.zeros(len(times_docking))
-
-total_J = 0
-for i in range(len(times_docking)):
-    thrust_profile[i] = thrust_func(times_docking[i], y_abm4_docking[i])
-    distances[i] = np.linalg.norm(positions[i])
-    rel_velocities[i] = np.linalg.norm(velocities[i])
+if thrust_func == thrust_func_optimal and optimal_controller.optimised:
+    print("Plotting optimal control results from pre-computed solution...")
     
-    # Trapezoidal integration for performance index
-    if i > 0:
-        dt = times_docking[i] - times_docking[i-1]
-        u_prev = thrust_profile[i-1]
-        u_curr = thrust_profile[i]
-        total_J += 0.5 * dt * (np.dot(u_prev, u_prev) + np.dot(u_curr, u_curr))
-    performance_index[i] = total_J
+    # Use the already computed trajectory from the optimization
+    U_flat = optimal_controller.control_profile.flatten()
+    Y_optimised = optimal_controller.simulate_trajectory(U_flat)
+    Y_optimised = Y_optimised.T  
+    
+    # Extract results from pre-computed optimal solution
+    positions = Y_optimised[:, :3]
+    velocities = Y_optimised[:, 3:]
+    
+    # Calculate metrics using the optimal control profile
+    thrust_profile = optimal_controller.control_profile.T  # Transpose to (N, 3)
+    distances = np.linalg.norm(positions, axis=1)
+    rel_velocities = np.linalg.norm(velocities, axis=1)
+    
+    # Calculate performance index - match the objective function J = ½∫uᵀu dt
+    performance_index = np.zeros(len(times_docking))
+    total_J = 0
+    for i in range(len(times_docking)):
+        if i > 0:
+            dt = times_docking[i] - times_docking[i-1]
+            u_prev = thrust_profile[i-1]
+            u_curr = thrust_profile[i]
+            # J = ½∫uᵀu dt ≈ ½ × [trapezoidal rule of u²]
+            trapezoidal_integral = 0.5 * dt * (np.dot(u_prev, u_prev) + np.dot(u_curr, u_curr))
+            total_J += 0.5 * trapezoidal_integral  # Add the ½ factor
+        performance_index[i] = total_J
+
+else:
+    # Run simulation for other controllers (PD, LQR)
+    print("Running simulation for non-optimal controller...")
+    # Simulate docking using ABM4
+    y_abm4_docking, _ = mt.abm4_all_step(h_docking, times_docking, dy_dt, y0)
+
+    # Extract results
+    positions = y_abm4_docking[:, :3]
+    velocities = y_abm4_docking[:, 3:]
+
+    # Calculate thrust profile and performance metrics
+    thrust_profile = np.zeros((len(times_docking), 3))
+    distances = np.zeros(len(times_docking))
+    rel_velocities = np.zeros(len(times_docking))
+    performance_index = np.zeros(len(times_docking))
+
+    # Calculate performance index - match the objective function J = 1/2∫uTu dt
+    performance_index = np.zeros(len(times_docking))
+    total_J = 0
+    for i in range(len(times_docking)):
+        if i > 0:
+            dt = times_docking[i] - times_docking[i-1]
+            u_prev = thrust_profile[i-1]
+            u_curr = thrust_profile[i]
+            # J = 1/2∫uTu dt ≈ 1/2 × [trapezoidal rule of u^2]
+            trapezoidal_integral = 0.5 * dt * (np.dot(u_prev, u_prev) + np.dot(u_curr, u_curr))
+            total_J += 0.5 * trapezoidal_integral  # Add the 1/2 factor
+        performance_index[i] = total_J
+
+
 
 # Check docking success
 final_distance = distances[-1]

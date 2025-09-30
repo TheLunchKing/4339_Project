@@ -276,7 +276,7 @@ def compare_methods():
     # Test setup
     y0_test = np.array([10, 10, 10, 0, 0, 0])  # km, km/s
     t0, tf = 0, T_orb
-    N = 6000
+    N = 2000
     period = np.linspace(t0, tf, N)
     h = period[1] - period[0]
     
