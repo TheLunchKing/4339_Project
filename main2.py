@@ -1,5 +1,6 @@
 
 import time
+from datetime import datetime
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -98,14 +99,14 @@ def thrust_func_lqr_fuel_optimised(t, y):
 # ==============================================================================
 # OPTIMAL CONTROL VIA DIRECT COLLOCATION
 # ==============================================================================
-class OptimizationConverged(Exception):
+class OptimisationConverged(Exception):
     pass
 class OptimalControlDocking:
-    def __init__(self, times, y0, max_thrust=0.07):
+    def __init__(self, times, y0, N, max_thrust=0.07):
         self.times = times
         self.y0 = y0
         self.max_thrust = max_thrust
-        self.N = 200 
+        self.N = N 
         self.dt = self.times[1] - self.times[0]
         self.control_profile = None
         self.optimised = False
@@ -148,21 +149,21 @@ class OptimalControlDocking:
             
     #     return Y
 
-    # def simulate_trajectory(self, U_flat):
-    #     """Simulate trajectory given control sequence using ABM4"""
-    #     U = U_flat.reshape(3, self.N)
+    def simulate_trajectory2(self, U_flat):
+        """Simulate trajectory given control sequence using ABM4"""
+        U = U_flat.reshape(3, self.N)
         
-    #     # Create a closure that captures the control sequence
-    #     def dy_dt_with_controls(t, y):
-    #         # Find the nearest control index
-    #         idx = min(int(t / self.dt), self.N-1)
-    #         current_u = U[:, idx]
-    #         return self.dynamics(y, current_u)
+        # Create a closure that captures the control sequence
+        def dy_dt_with_controls(t, y):
+            # Find the nearest control index
+            idx = min(int(t / self.dt), self.N-1)
+            current_u = U[:, idx]
+            return self.dynamics(y, current_u)
         
-    #     y_abm4, calc_times_abm4 = mt.abm4_all_step(self.dt, self.times, dy_dt_with_controls, self.y0)
+        y_abm4, calc_times_abm4 = mt.abm4_all_step(self.dt, self.times, dy_dt_with_controls, self.y0)
         
-    #     # Transpose to match original shape (6, N) instead of (N, 6)
-    #     return y_abm4.T  # or y_abm4.T depending on your ABM4 output shape
+        # Transpose to match original shape (6, N) instead of (N, 6)
+        return y_abm4.T  # or y_abm4.T depending on your ABM4 output shape
     
     def simulate_trajectory(self, U_flat):
         """Faster Euler integration for optimisation"""
@@ -183,7 +184,7 @@ class OptimalControlDocking:
     
     def constraints(self, U_flat):
         """Docking constraints"""
-        Y = self.simulate_trajectory(U_flat)
+        Y = self.simulate_trajectory2(U_flat)
         final_pos = Y[:3, -1]
         final_vel = Y[3:, -1]
         
@@ -234,17 +235,19 @@ class OptimalControlDocking:
             else:
                 constr_status = f"VIOLATED by {constr_violation:.2e}"
             
-            Y_current = self.simulate_trajectory(xk)
+            Y_current = self.simulate_trajectory2(xk)
             final_pos = np.linalg.norm(Y_current[:3, -1])
             final_vel = np.linalg.norm(Y_current[3:, -1])
+
+            current_datetime = datetime.now()
                 
-            print(f"Iteration {self.iteration_count}: J = {current_j:.6f}, Constraints: {constr_status}, p = {final_pos}, v = {final_vel}")
+            print(f"Iteration {self.iteration_count}: J = {current_j:.6f}, Constraints: {constr_status}, p = {final_pos}, v = {final_vel}, time = {current_datetime}")
             
             # Stops optimisation if goals are reached
-            if current_j < 0.35 and constr_violation < 0.001:
+            if current_j < 0.35 and constr_violation < 4:
                 print("Converged to satisfactory solution!")
                 self.best_solution = xk.copy()
-                raise OptimizationConverged("Optimal solution found")
+                raise OptimisationConverged("Optimal solution found")
             else:
                 return False
         
@@ -258,7 +261,7 @@ class OptimalControlDocking:
                 callback=callback,  
                 options=options
             )
-        except OptimizationConverged:
+        except OptimisationConverged:
             result = type('obj', (object,), {
                 'success': True, 
                 'x': self.best_solution,
@@ -273,7 +276,7 @@ class OptimalControlDocking:
             self.optimised = True
             
             # Verify solution
-            Y = self.simulate_trajectory(result.x)
+            Y = self.simulate_trajectory2(result.x)
             final_pos = np.linalg.norm(Y[:3, -1])
             final_vel = np.linalg.norm(Y[3:, -1])
             J_value = result.fun
@@ -313,9 +316,9 @@ def thrust_func_optimal(t, y):
 # SELECT ACTIVE CONTROLLER HERE
 # ===========================================================================
 
-thrust_func = thrust_func_pd                    # PD Controller
+# thrust_func = thrust_func_pd                    # PD Controller
 # thrust_func = thrust_func_lqr_fuel_optimised    # Fuel-optimised LQR
-# thrust_func = thrust_func_optimal               # Optimal Control
+thrust_func = thrust_func_optimal               # Optimal Control
 
 
 
@@ -336,12 +339,15 @@ elif thrust_func == thrust_func_lqr_fuel_optimised:
     times_docking = np.linspace(t0, tf, N)
     h_docking = times_docking[1] - times_docking[0]
 else:
-    t0, tf = 0, 1*T_orb  
-    N = 200
+    t0, tf = 0,12*T_orb  
+    N =4000
     times_docking = np.linspace(t0, tf, N)
     h_docking = times_docking[1] - times_docking[0]
-    optimal_controller = OptimalControlDocking(times_docking, y0, max_thrust)
+    optimal_controller = OptimalControlDocking(times_docking, y0, N, max_thrust)
+    time_start = time.perf_counter()
     optimal_controller.optimise_control()
+    time_end = time.perf_counter()
+    
 
 
 
@@ -372,7 +378,7 @@ if thrust_func == thrust_func_optimal and optimal_controller.optimised:
     
     # Use precomputed result
     U_flat = optimal_controller.control_profile.flatten()
-    Y_optimised = optimal_controller.simulate_trajectory(U_flat)
+    Y_optimised = optimal_controller.simulate_trajectory2(U_flat)
     Y_optimised = Y_optimised.T  
     
     # Extract results
@@ -442,6 +448,7 @@ print(f"Final distance: {final_distance:.3f} m")
 print(f"Final velocity: {final_velocity:.3f} m/s")
 print(f"Docking successful: {'YES' if docking_success else 'NO'}")
 print(f"Total performance index J: {performance_index[-1]:.6f}")
+print(f"Total computation time t = {time_end-time_start}")
 
 # Create all required plots
 fig = plt.figure(figsize=(16, 12))

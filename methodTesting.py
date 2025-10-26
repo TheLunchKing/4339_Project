@@ -418,10 +418,10 @@ if __name__ == "__main__":
     print(f"Orbital rate: {n:.6f} rad/s")
     
     # Compare all methods
-    compare_methods()
+    # compare_methods()
     
     # Test a specific method
-    # test_single_method('ABM4')  
+    test_single_method('ABM4')  
 
 
 
