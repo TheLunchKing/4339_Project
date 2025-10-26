@@ -339,8 +339,8 @@ elif thrust_func == thrust_func_lqr_fuel_optimised:
     times_docking = np.linspace(t0, tf, N)
     h_docking = times_docking[1] - times_docking[0]
 else:
-    t0, tf = 0,12*T_orb  
-    N =4000
+    t0, tf = 0,5*T_orb  
+    N = 600
     times_docking = np.linspace(t0, tf, N)
     h_docking = times_docking[1] - times_docking[0]
     optimal_controller = OptimalControlDocking(times_docking, y0, N, max_thrust)

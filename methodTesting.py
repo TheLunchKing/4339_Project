@@ -253,6 +253,36 @@ def dormand_prince_all_step(h: float, times: np.array, dy_dt, y0) -> tuple:
     return y_dp, calc_times_dp
 
 
+# ============ EULER ============
+def euler_step(t, y, h: float, dy_dt) -> tuple:
+    """Euler integrator - simple but low accuracy"""
+    time_start = time.perf_counter()
+    
+    y_p = y + h * dy_dt(t, y)
+    
+    time_end = time.perf_counter()
+    return y_p, time_end - time_start
+
+def euler_all_step(h: float, times: np.array, dy_dt, y0) -> tuple:
+    """Euler all step integration"""
+    y_euler = np.zeros((len(times), 6))
+    y_euler_i = y0.copy()
+    y_euler[0] = y_euler_i
+
+    calc_time_euler = 0
+    calc_times_euler = [calc_time_euler]
+
+    for i in range(len(times) - 1):
+        t = times[i]
+        y_euler_i, calc_time_i = euler_step(t, y_euler_i, h, dy_dt)
+        y_euler[i + 1] = y_euler_i
+        calc_time_euler += calc_time_i
+        calc_times_euler.append(calc_time_euler)
+
+    print("Euler time: ", calc_times_euler[-1])
+    return y_euler, calc_times_euler
+
+
 # ============ METHOD SWITCHER ============
 def integrate(method: str, h: float, times: np.array, dy_dt, y) -> tuple:
     """Switch between different integration methods"""
@@ -260,6 +290,8 @@ def integrate(method: str, h: float, times: np.array, dy_dt, y) -> tuple:
     
     if method == 'RK4':
         return rk4_all_step(h, times, dy_dt, y)
+    elif method == 'EULER':
+        return euler_all_step(h, times, dy_dt, y)
     elif method == 'ABM4':
         return abm4_all_step(h, times, dy_dt, y)
     elif method == 'VELOCITY_VERLET' or method == 'VV':
@@ -277,8 +309,8 @@ def compare_methods():
     """Compare all integration methods"""
     # Test setup
     y0_test = np.array([10, 10, 10, 0, 0, 0])  # km, km/s
-    t0, tf = 0, T_orb
-    N = 6000
+    t0, tf = 0, 5*T_orb
+    N = 600
     period = np.linspace(t0, tf, N)
     h = period[1] - period[0]
     
@@ -295,7 +327,7 @@ def compare_methods():
     )
     
     # Methods to test
-    methods = ['RK4', 'ABM4', 'VELOCITY_VERLET', 'RK4_HP']
+    methods = ['RK4', 'ABM4', 'EULER', 'RK4_HP']
     colors = ['red', 'orange', 'green', 'blue', 'purple']
     
     fig = plt.figure(figsize=(20, 10))
@@ -418,10 +450,10 @@ if __name__ == "__main__":
     print(f"Orbital rate: {n:.6f} rad/s")
     
     # Compare all methods
-    # compare_methods()
+    compare_methods()
     
     # Test a specific method
-    test_single_method('ABM4')  
+    # test_single_method('ABM4')  
 
 
 
